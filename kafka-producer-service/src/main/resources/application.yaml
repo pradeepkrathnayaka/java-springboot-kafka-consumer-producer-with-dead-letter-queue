@@ -1,0 +1,58 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: kafka-producer-service
+
+  kafka:
+    bootstrap-servers: 192.168.0.8:9092,192.168.0.8:9093,192.168.0.8:9094
+
+    properties:
+      spring.json.trusted.packages: "*"          # ✅ restrict in prod: "com.yourcompany.dto.*"
+
+    # ════════════════════════════════════════════════════
+    #  PRODUCER CONFIGURATION
+    # ════════════════════════════════════════════════════
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer  # ✅ FIXED: was JsonDeserializer — producers serialize, consumers deserialize
+
+      # --- Reliability ---
+      acks: all                                   # ✅ strongest durability guarantee
+      retries: 3                                  # retry on transient failures
+
+      # --- Idempotence (exactly-once safety net) ---
+      properties:
+        spring.json.trusted.packages: "com.rmpk.kprodu.model"  # ✅ FIXED: package matches actual source package (kprodu not kconsu)
+        spring.json.use.type.headers: true
+        enable.idempotence: true                  # ✅ prevents duplicate writes
+        max.in.flight.requests.per.connection: 5  # safe with idempotence=true
+        delivery.timeout.ms: 120000               # 2min — total time for send()
+        request.timeout.ms: 30000                 # 30s  — per-request timeout
+        retry.backoff.ms: 1000
+
+      # --- Performance / Batching ---
+      batch-size: 32768                           # 32 KB batch
+      buffer-memory: 67108864                     # 64 MB total buffer
+      compression-type: lz4                       # ✅ best latency/compression ratio
+
+# Custom app properties
+app:
+  kafka:
+    topics:
+      main: orders-topic
+      dlt: orders-topic.DLT
+    retry:
+      max-attempts: 3
+      initial-interval-ms: 1000
+      multiplier: 2.0
+      max-interval-ms: 10000
+
+# ════════════════════════════════════════════════════════
+#  LOGGING
+# ════════════════════════════════════════════════════════
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO

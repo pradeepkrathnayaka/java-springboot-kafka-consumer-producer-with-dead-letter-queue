@@ -1,0 +1,71 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: kafka-consumer-service
+
+  kafka:
+    bootstrap-servers: 192.168.0.8:9092,192.168.0.8:9093,192.168.0.8:9094
+
+    # ════════════════════════════════════════════════════
+    #  CONSUMER
+    # ════════════════════════════════════════════════════
+    consumer:
+      group-id: my-group
+      auto-offset-reset: earliest
+      enable-auto-commit: false                     # ✅ manual commit = no data loss
+
+      # Deserializer classes are intentionally omitted here.
+      # KafkaConfig.java supplies ErrorHandlingDeserializer-wrapped instances
+      # programmatically, which is required for DLT routing of bad messages.
+      # Defining them here as well would conflict with the programmatic setup.
+
+      # --- Performance Tuning ---
+      fetch-min-size: 1048576                       # 1 MB  — batch fetches for throughput
+      fetch-max-wait: 500                           # ms    — max wait before returning fetch
+      max-poll-records: 500                         # records per poll()
+
+      # --- Session & Heartbeat ---
+      properties:
+        session.timeout.ms: 30000                   # 30 s  — broker waits before rebalance
+        heartbeat.interval.ms: 10000               # 10 s  — must be < session.timeout / 3
+        max.poll.interval.ms: 300000               # 5 min — max time between poll() calls
+        reconnect.backoff.ms: 1000
+        reconnect.backoff.max.ms: 10000
+        partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
+
+    # ════════════════════════════════════════════════════
+    #  LISTENER (Consumer Container)
+    # ════════════════════════════════════════════════════
+    listener:
+      # ✅ FIX #4 — was "batch"; all listener methods (OrderConsumer, MessageConsumer,
+      #    DltConsumer) accept a single record, not a List.  Batch mode forces Spring
+      #    to pass a List<ConsumerRecord> which causes a MethodArgumentTypeMismatch at
+      #    runtime.  "single" (the default) is correct here.
+      type: single
+      concurrency: 3                                # 3 threads = 3 partitions in parallel
+      ack-mode: record                              # ✅ per-record offset commit
+      idle-event-interval: 60000                    # emit event if consumer is idle (ms)
+
+# ════════════════════════════════════════════════════════
+#  Custom App Properties
+# ════════════════════════════════════════════════════════
+app:
+  kafka:
+    topics:
+      main: orders-topic
+      dlt: orders-topic.DLT
+    retry:
+      max-attempts: 3
+      initial-interval-ms: 1000
+      multiplier: 2.0
+      max-interval-ms: 10000
+
+# ════════════════════════════════════════════════════════
+#  LOGGING
+# ════════════════════════════════════════════════════════
+logging:
+  level:
+    org.apache.kafka: WARN
+    org.springframework.kafka: INFO
