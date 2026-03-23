@@ -21,8 +21,8 @@ import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.*;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.util.backoff.ExponentialBackOff;
-import org.springframework.kafka.support.serializer.JsonDeserializer;
-import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.kafka.support.serializer.JacksonJsonDeserializer;
+import org.springframework.kafka.support.serializer.JacksonJsonSerializer;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -81,8 +81,8 @@ public class KafkaConfig {
     // ✅ FIX #1 + #2 — Consumer Factory with ErrorHandlingDeserializer
     //    and cross-service TYPE_MAPPINGS
     //
-    //  FIX #1: Wrap JsonDeserializer with ErrorHandlingDeserializer so that
-    //          deserialization failures are routed to the DLT instead of
+    //  FIX #1: Wrap JacksonJsonDeserializer with ErrorHandlingDeserializer so
+    //          that deserialization failures are routed to the DLT instead of
     //          crashing the listener container.
     //          The raw SerializationException is caught inside
     //          ErrorHandlingDeserializer and re-surfaced as a normal
@@ -103,17 +103,17 @@ public class KafkaConfig {
         props.remove(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG);
         props.remove(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG);
 
-        // --- Configure JsonDeserializer -----------------------------------------
-        JsonDeserializer<Object> jsonDeserializer = new JsonDeserializer<>();
+        // --- Configure JacksonJsonDeserializer (Jackson 3 — Spring Kafka 4.0+) ---
+        JacksonJsonDeserializer<Object> jsonDeserializer = new JacksonJsonDeserializer<>();
         jsonDeserializer.configure(Map.of(
                 // Map the producer's FQCN to the local model class (FIX #2)
-                JsonDeserializer.TYPE_MAPPINGS,
+                JacksonJsonDeserializer.TYPE_MAPPINGS,
                     "com.rmpk.kprodu.model.OrderEvent:com.rmpk.kconsu.model.OrderEvent",
                 // Trust only our own model package (least-privilege)
-                JsonDeserializer.TRUSTED_PACKAGES,
+                JacksonJsonDeserializer.TRUSTED_PACKAGES,
                     "com.rmpk.kconsu.model",
                 // Honour the __TypeId__ header set by the producer
-                JsonDeserializer.USE_TYPE_INFO_HEADERS, "true"
+                JacksonJsonDeserializer.USE_TYPE_INFO_HEADERS, "true"
         ), false /* isKey */);
 
         // --- Wrap both deserializers with ErrorHandlingDeserializer (FIX #1) ------
@@ -159,9 +159,9 @@ public class KafkaConfig {
     public ProducerFactory<String, Object> producerFactory() {
         Map<String, Object> props = new HashMap<>(kafkaProperties.buildProducerProperties());
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,   StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JacksonJsonSerializer.class);
         // Include type headers so downstream consumers can deserialize correctly
-        props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, true);
+        props.put(JacksonJsonSerializer.ADD_TYPE_INFO_HEADERS, true);
         return new DefaultKafkaProducerFactory<>(props);
     }
 
@@ -208,7 +208,7 @@ public class KafkaConfig {
         // ── Non-retryable: bad data, deserialization problems → straight to DLT ─
         errorHandler.addNotRetryableExceptions(
                 NonRetryableException.class,
-                com.fasterxml.jackson.core.JsonParseException.class,
+                tools.jackson.core.exc.StreamReadException.class,
                 org.apache.kafka.common.errors.SerializationException.class,
                 ClassCastException.class,
                 IllegalArgumentException.class    // covers trusted-packages failures
